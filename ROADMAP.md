@@ -15,7 +15,7 @@ G4 are closed below, on the runs and on the reading of the body against the repo
 and 3.4 did not close it: one maintainer wrote both callers. Every claim here names the run or
 the file it was read from.
 
-Last updated: 2026-11-21T07:54Z (close 9.15-9.18, ci and watch timeouts, fork guard, watch job split)
+Last updated: 2026-11-21T18:20Z (close 9.19-9.22, body ceiling, issue pagination, single-attempt create, rate-limit reset retry)
 rather than three, because a contributor who picked up two of them learned no format at all. The
 organization's `ISSUE_CONTRACT.md` in `posture-sec/.github` defines PI-1: a marker line naming the
 repository, the roadmap row, the kind and the wave tier, then nine numbered sections in the order a
@@ -690,6 +690,26 @@ it is why this repository's value right now is the plumbing rather than the find
   is the one that can hold `cancel-in-progress: false`. Arithmetic: about 120 s for a cold Go
   build (job 126475427542 took 118 s end to end) plus three retries at a 60 s ceiling is about
   300 s, and 30 min (1800 s) leaves 6x headroom against a six-hour default. **Issue:** #102.
+- [x] **9.19** Cap the rendered body and name the findings dropped to fit. Done-when:
+  `scripts/render_report.py` defines `BODY_LIMIT` at the API limit, measures the assembled body,
+  trims finding rows in blocks until it fits, states how many rows were withheld while the state
+  marker stays last and decodable, and `tests/test_body_size.py` builds an over-limit report and
+  asserts the length, the notice and a decodable marker. A body under the ceiling renders
+  unchanged. **Issue:** #59.
+- [x] **9.20** Follow issue-list pagination past the fifth page. Done-when: `find_issue()` pages
+  until a batch shorter than `ISSUE_PAGE_SIZE` or an empty batch, `MAX_ISSUE_PAGES` names the hard
+  cap, reaching it prints one line saying a marker may sit beyond, and
+  `tests/test_sync_pagination.py` stubs six full pages and a seventh carrying the marker. **Issue:**
+  #60.
+- [x] **9.21** Stop retrying the create call after a timeout. Done-when: `request()` takes an
+  `attempts` policy, `get_json()` passes it through, the create call asks for one attempt so a
+  lost response exits 3 without a second POST, a GET still makes three, and
+  `tests/test_sync_create_retry.py` asserts one POST and the exit code. **Issue:** #61.
+- [x] **9.22** Retry a 403 that carries only `X-RateLimit-Reset`. Done-when: a helper reads
+  `X-RateLimit-Remaining` and `X-RateLimit-Reset`, a reset inside `MAX_RETRY_WAIT` is slept until
+  and retried once, a reset outside raises on the first response naming the reset as a UTC ISO
+  timestamp, a 403 without either header or with remaining above zero still fails, and
+  `tests/test_sync_rate_limit_reset.py` covers all four shapes. **Issue:** #62.
 
 ## 6. Gates
 
@@ -756,7 +776,7 @@ it is why this repository's value right now is the plumbing rather than the find
 | 1 | The action | 11 | 11 | 100% |
 | 2 | Public shape | 12 | 13 | 92% |
 | 3 | Real use | 5 | 8 | 62% |
-| 9 (backlog) | Backlog, not scheduled | 12 | 18 | 67% |
+| 9 (backlog) | Backlog, not scheduled | 16 | 22 | 73% |
 | **All phases** | **Readiness total** | **35** | **39** | **90%** |
 | Gates | G1 to G5 | 4 | 5 | 80% |
 <!-- PROGRESS:END -->
@@ -794,5 +814,5 @@ it is why this repository's value right now is the plumbing rather than the find
 
 ## 9. Last updated line format
 
-`Last updated: 2026-11-21T07:54Z (close 9.15-9.18, ci and watch timeouts, fork guard, watch job split)
+`Last updated: 2026-11-21T18:20Z (close 9.19-9.22, body ceiling, issue pagination, single-attempt create, rate-limit reset retry)
 written, not when it merged.

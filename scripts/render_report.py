@@ -34,6 +34,12 @@ MARKER_PREFIX = "<!-- posture-watch:state v1 "
 MARKER_SUFFIX = " -->"
 MAX_STATE_ENTRIES = 200
 MAX_MARKER_CHARS = 20_000
+#: The issue body ceiling, matching the API limit `sync_issue.py` trims against.
+BODY_LIMIT = 65_536
+DROP_NOTICE = (
+    "\n_{dropped} finding row(s) were left out of this body to stay under the "
+    "{limit}-character issue limit; the state marker still carries the full open set._\n"
+)
 SEVERITIES = ("high", "warn")
 SEVERITY_RANK = {"high": 0, "warn": 1}
 HEX64 = re.compile(r"^[0-9a-f]{64}$")
@@ -209,6 +215,41 @@ def sort_findings(findings: list[Finding]) -> list[Finding]:
         findings,
         key=lambda f: (SEVERITY_RANK[f["severity"]], f["rule"], f["account"], f["fingerprint"]),
     )
+
+
+def fit_body(body: str) -> tuple[str, int]:
+    """Trim finding rows until the assembled body fits the issue ceiling.
+
+    Rows are dropped in blocks from the end of the document, which is the Current
+    findings table, and the notice names how many went. The counts line, the mode and
+    exit line, the account table and the state marker are never touched: the marker is
+    the last line and stays decodable, and it still carries the open set.
+    """
+    if len(body) <= BODY_LIMIT:
+        return body, 0
+
+    def row_indexes(lines: list[str]) -> list[int]:
+        return [
+            i
+            for i, line in enumerate(lines)
+            if line.startswith("| high |") or line.startswith("| warn |")
+        ]
+
+    lines = body.splitlines(keepends=True)
+    rows = row_indexes(lines)
+    dropped = 0
+    while rows and len("".join(lines)) > BODY_LIMIT:
+        block = max(1, len(rows) // 8)
+        remove = set(rows[-block:])
+        lines = [line for i, line in enumerate(lines) if i not in remove]
+        dropped += len(remove)
+        rows = row_indexes(lines)
+    if dropped:
+        for i, line in enumerate(lines):
+            if line.startswith(MARKER_PREFIX):
+                lines.insert(i, DROP_NOTICE.format(dropped=dropped, limit=BODY_LIMIT))
+                break
+    return "".join(lines), dropped
 
 
 def finding_rows(findings: list[Finding]) -> str:
@@ -393,7 +434,10 @@ def render(args: argparse.Namespace) -> tuple[str, dict[str, object]]:
         "omitted": omitted,
         "as_of": args.as_of,
     }
-    return "".join(parts), summary
+    body, dropped = fit_body("".join(parts))
+    if dropped:
+        summary["dropped"] = dropped
+    return body, summary
 
 
 def parse_args(argv: list[str] | None) -> argparse.Namespace:
@@ -498,6 +542,9 @@ def main(argv: list[str] | None = None) -> int:
                 tmp_summary.unlink()
         print(f"render_report: cannot write {out}: {exc.strerror}", file=sys.stderr)
         return 2
+    dropped = summary.get("dropped", 0)
+    if dropped:
+        print(f"render_report: dropped {dropped} finding row(s) to fit the body limit")
     print(f"render_report: wrote {out} ({len(body)} characters); {counts_text}")
     return 0
 
